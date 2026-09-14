@@ -19,6 +19,7 @@ frame.addEventListener('load',()=>{
   const WORDS_KEY='word-piggy-bank-v1';
   const STATS_KEY='word-piggy-bank-stats-v1';
   const IMAGE_MAP_KEY='word-piggy-bank-image-map-v1';
+  const AUDIO_MAP_KEY='word-piggy-bank-audio-map-v1';
   const defaults={showImages:false,pexelsKey:'',weightedPractice:true};
   const loadJSON=(k,f)=>{try{return JSON.parse(localStorage.getItem(k)||'')||f}catch{return f}};
   const loadSettings=()=>({...defaults,...loadJSON(SETTINGS_KEY,{})});
@@ -26,6 +27,10 @@ frame.addEventListener('load',()=>{
   const saveSettings=()=>localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));
   let imageMap=loadJSON(IMAGE_MAP_KEY,{});
   const saveImageMap=()=>{try{localStorage.setItem(IMAGE_MAP_KEY,JSON.stringify(imageMap))}catch{}};
+  let audioMap=loadJSON(AUDIO_MAP_KEY,{});
+  const saveAudioMap=()=>{try{localStorage.setItem(AUDIO_MAP_KEY,JSON.stringify(audioMap))}catch{}};
+  const audioElements=new Map();
+  const audioInFlight=new Map();
 
   const style=doc.createElement('style');
   style.textContent=`
@@ -58,14 +63,56 @@ frame.addEventListener('load',()=>{
     const preferred=['Samantha','Ava','Allison','Susan','Joelle','Evan','Alex'];
     return preferred.map(n=>us.find(v=>v.name.includes(n))).find(Boolean)||us.find(v=>v.localService)||us[0]||voices.find(v=>/^en/i.test(v.lang))||null;
   }
+  function systemSpeak(word){
+    if(!word||!('speechSynthesis' in win))return false;
+    try{
+      win.speechSynthesis.cancel();
+      const u=new win.SpeechSynthesisUtterance(word);u.lang='en-US';u.rate=.9;u.pitch=1;
+      const voice=bestUSVoice();if(voice)u.voice=voice;
+      win.speechSynthesis.speak(u);return true;
+    }catch{return false}
+  }
+  function audioKey(word){return String(word||'').trim().toLowerCase()}
+  function ensureAudio(word,url){
+    const k=audioKey(word);if(!k||!url)return null;
+    let a=audioElements.get(k);
+    if(!a){a=new win.Audio();a.preload='auto';a.src=url;try{a.load()}catch{}audioElements.set(k,a)}
+    else if(a.src!==url){a.src=url;try{a.load()}catch{}}
+    return a;
+  }
+  async function primeAudio(word){
+    const k=audioKey(word);if(!k||!/^[a-z][a-z '\-]*$/.test(k))return null;
+    if(audioMap[k]){ensureAudio(k,audioMap[k]);return audioMap[k]}
+    if(audioInFlight.has(k))return audioInFlight.get(k);
+    const task=(async()=>{
+      try{
+        const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),2600);
+        const r=await win.fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(k)}`,{signal:controller.signal,cache:'force-cache'});clearTimeout(timer);
+        if(!r.ok)return null;const entries=await r.json();
+        const phonetics=(Array.isArray(entries)?entries:[]).flatMap(e=>e.phonetics||[]).filter(p=>p?.audio);
+        const preferred=phonetics.find(p=>/-us\.mp3(?:$|\?)/i.test(p.audio))||phonetics.find(p=>/us/i.test(p.audio))||phonetics[0];
+        const url=preferred?.audio||'';if(!url)return null;
+        audioMap[k]=url;saveAudioMap();ensureAudio(k,url);return url;
+      }catch{return null}
+    })().finally(()=>audioInFlight.delete(k));
+    audioInFlight.set(k,task);return task;
+  }
   function speakText(text){
-    const word=String(text||'').trim(); if(!word||!('speechSynthesis' in win))return;
-    win.speechSynthesis.cancel(); const u=new win.SpeechSynthesisUtterance(word);u.lang='en-US';u.rate=.9;u.pitch=1;
-    const voice=bestUSVoice();if(voice)u.voice=voice;win.speechSynthesis.speak(u);
+    const word=String(text||'').trim();if(!word)return;
+    const k=audioKey(word),url=audioMap[k];
+    if(url){
+      try{win.speechSynthesis?.cancel?.()}catch{}
+      const a=ensureAudio(k,url);
+      if(a){try{a.pause();a.currentTime=0}catch{};const played=a.play();
+        if(played?.catch)played.catch(()=>systemSpeak(word));return;
+      }
+    }
+    systemSpeak(word);
+    primeAudio(word);
   }
   win.speechSynthesis?.getVoices?.();
 
-  const enhanceWords=()=>doc.querySelectorAll('#wordList .word-main').forEach(el=>{if(el.dataset.speakReady)return;el.dataset.speakReady='1';el.setAttribute('role','button');el.tabIndex=0;const word=el.querySelector('b')?.textContent?.trim()||'';el.title=word?`点击朗读 ${word}`:'点击朗读';el.setAttribute('aria-label',word?`朗读 ${word}`:'朗读单词')});
+  const enhanceWords=()=>{const rows=[...doc.querySelectorAll('#wordList .word-main')];rows.forEach((el,i)=>{if(!el.dataset.speakReady){el.dataset.speakReady='1';el.setAttribute('role','button');el.tabIndex=0;const word=el.querySelector('b')?.textContent?.trim()||'';el.title=word?`点击朗读 ${word}`:'点击朗读';el.setAttribute('aria-label',word?`朗读 ${word}`:'朗读单词')}if(i<12){const word=el.querySelector('b')?.textContent?.trim()||'';if(word)primeAudio(word)}})};
   doc.addEventListener('click',e=>{
     const wordMain=e.target.closest?.('#wordList .word-main');if(wordMain){speakText(wordMain.querySelector('b')?.textContent);return}
     const choice=e.target.closest?.('.choice[data-review-ready="1"]');if(choice)speakText(choice.dataset.value||choice.textContent.replace(/^[A-D]\s*/,''));
@@ -164,12 +211,14 @@ frame.addEventListener('load',()=>{
     if(!settings.showImages)return;
     const prepared=peekPrepared(activeItem||{word,meaning});
     if(prepared)applyPhoto(tiles[0],prepared,word,meaning);
+    // 不等待网络：如果预加载还没完成，保留语义卡。网络结果只留给下次复习使用。
   }
 
   const quizBody=doc.getElementById('quizBody');
   let choicePassScheduled=false;
   const processQuiz=()=>{
     choicePassScheduled=false;
+    doc.querySelectorAll('.choice').forEach(btn=>{const w=btn.dataset.value||'';if(w)primeAudio(w)});
     doc.querySelectorAll('.choice:disabled').forEach(btn=>{
       if((btn.classList.contains('correct')||btn.classList.contains('wrong'))&&btn.dataset.reviewReady!=='1'){
         btn.disabled=false;btn.dataset.reviewReady='1';btn.title='再点一次可听美式发音';
@@ -183,7 +232,7 @@ frame.addEventListener('load',()=>{
   function makeSettings(){
     const btn=doc.createElement('button');btn.className='study-settings-btn';btn.type='button';btn.textContent='⚙️ 设置';
     const back=doc.createElement('div');back.className='study-settings-backdrop';
-    back.innerHTML=`<div class="study-settings" role="dialog" aria-modal="true"><h3>学习设置</h3><p>图片设置、Pexels Key 和同步密钥只保存在当前浏览器。</p><div class="setting-row"><div><strong>掌握度加权抽题</strong><small>掌握度越高，被抽到的概率越低，但不会完全消失。</small></div><label class="switch"><input id="weightedToggle" type="checkbox"><i></i></label></div><div class="setting-row"><div style="flex:1"><strong>答错时显示图片</strong><small>出题时就后台预加载；答错时不等待网络。关闭后完全停止图片请求。</small><input id="pexelsKeyInput" class="setting-input" type="password" placeholder="Pexels API Key（仅保存在此设备）"></div><label class="switch"><input id="imageToggle" type="checkbox"><i></i></label></div><div class="setting-row"><div style="flex:1"><strong>学习同步密钥</strong><small>目前用于识别和迁移进度；自动云同步仍需要后端。</small><div class="sync-code" id="syncCode"></div></div></div><div class="settings-actions"><button id="copyKeyBtn">复制密钥</button><button id="exportBtn">复制进度包</button><button id="importBtn">导入进度包</button><button id="clearImageCacheBtn">清除图片缓存</button><button id="closeSettings" class="primary-mini">完成</button></div></div>`;
+    back.innerHTML=`<div class="study-settings" role="dialog" aria-modal="true"><h3>学习设置</h3><p>图片设置、Pexels Key 和同步密钥只保存在当前浏览器。</p><div class="setting-row"><div><strong>掌握度加权抽题</strong><small>掌握度越高，被抽到的概率越低，但不会完全消失。</small></div><label class="switch"><input id="weightedToggle" type="checkbox"><i></i></label></div><div class="setting-row"><div style="flex:1"><strong>答错时显示图片</strong><small>出题时就后台预加载；答错时不等待网络。图片失败不会影响下一题。</small><input id="pexelsKeyInput" class="setting-input" type="password" placeholder="Pexels API Key（仅保存在此设备）"></div><label class="switch"><input id="imageToggle" type="checkbox"><i></i></label></div><div class="setting-row"><div style="flex:1"><strong>学习同步密钥</strong><small>目前用于识别和迁移进度；自动云同步仍需要后端。</small><div class="sync-code" id="syncCode"></div></div></div><div class="settings-actions"><button id="copyKeyBtn">复制密钥</button><button id="exportBtn">复制进度包</button><button id="importBtn">导入进度包</button><button id="clearImageCacheBtn">清除图片缓存</button><button id="closeSettings" class="primary-mini">完成</button></div></div>`;
     doc.body.append(btn,back);
     const weighted=back.querySelector('#weightedToggle'),images=back.querySelector('#imageToggle'),keyInput=back.querySelector('#pexelsKeyInput');
     const refresh=()=>{settings=loadSettings();weighted.checked=!!settings.weightedPractice;images.checked=!!settings.showImages;keyInput.value=settings.pexelsKey||'';back.querySelector('#syncCode').textContent=syncKey};
