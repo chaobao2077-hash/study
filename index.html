@@ -26,10 +26,9 @@ frame.addEventListener('load',()=>{
     .semantic-card .icon{font-size:2.45rem;line-height:1;margin-bottom:8px}
     .semantic-card b{display:block;font-family:Georgia,serif;font-size:1.05rem;line-height:1.25;word-break:break-word}
     .semantic-card span{display:block;margin-top:6px;color:var(--muted);font-size:.72rem;line-height:1.35;max-width:100%;word-break:break-word}
-    .semantic-card.example b{font-family:inherit;font-size:.8rem;color:var(--orange)}
-    .semantic-card.example span{font-family:Georgia,serif;font-size:.72rem;color:var(--ink)}
-    .semantic-card.method b{font-family:inherit;font-size:.82rem}
-    .semantic-card.method span{font-size:.72rem}
+    .semantic-card.example b,.semantic-card.method b{font-family:inherit;font-size:.82rem}
+    .semantic-card.example span{font-family:Georgia,serif;color:var(--ink)}
+    .memory-actions{position:relative;z-index:5}
     @media(max-width:520px){.memory .pictures{grid-template-columns:1fr 1fr!important}.memory .picture:last-child{display:none!important}}
   `;
   doc.head.appendChild(style);
@@ -66,21 +65,18 @@ frame.addEventListener('load',()=>{
     const known={curious:'🔎',harvest:'🌾',whisper:'🤫',resilient:'🌱',glimpse:'👀',nourish:'🥣',apple:'🍎',book:'📚',car:'🚗',dog:'🐕',cat:'🐈',bird:'🐦',tree:'🌳',flower:'🌸',water:'💧',house:'🏠',school:'🏫',money:'💰',time:'⏰',food:'🍽️',computer:'💻',phone:'📱'};
     if(known[word.toLowerCase()])return known[word.toLowerCase()];
     const rules=[
-      [/动物|狗|猫|鸟|鱼|horse|animal|pet/,'🐾'],
-      [/植物|树|花|草|森林|plant|tree|flower|forest/,'🌿'],
-      [/水果|食物|食品|吃|饮|fruit|food|meal|drink/,'🍎'],
-      [/汽车|车辆|交通|火车|飞机|船|car|vehicle|train|plane|ship/,'🚗'],
-      [/房|建筑|学校|城市|国家|地点|house|building|school|city|country|place/,'🗺️'],
-      [/书|阅读|学习|知识|study|learn|book|read/,'📚'],
-      [/钱|经济|金融|money|finance|bank/,'💰'],
-      [/时间|日期|time|date|hour|minute/,'⏰'],
-      [/身体|器官|健康|body|health|heart|brain/,'🫀'],
-      [/快乐|悲伤|焦虑|害怕|情绪|感觉|happy|sad|anxiety|fear|emotion|feel/,'💭']
+      [/动物|狗|猫|鸟|鱼|horse|animal|pet/,'🐾'],[/植物|树|花|草|森林|plant|tree|flower|forest/,'🌿'],
+      [/水果|食物|食品|吃|饮|fruit|food|meal|drink/,'🍎'],[/汽车|车辆|交通|火车|飞机|船|car|vehicle|train|plane|ship/,'🚗'],
+      [/房|建筑|学校|城市|国家|地点|house|building|school|city|country|place/,'🗺️'],[/书|阅读|学习|知识|study|learn|book|read/,'📚'],
+      [/钱|经济|金融|money|finance|bank/,'💰'],[/时间|日期|time|date|hour|minute/,'⏰'],
+      [/身体|器官|健康|body|health|heart|brain/,'🫀'],[/快乐|悲伤|焦虑|害怕|情绪|感觉|happy|sad|anxiety|fear|emotion|feel/,'💭']
     ];
     return rules.find(([re])=>re.test(text))?.[1]||'🧠';
   };
 
   const addCard=(tile,cls,icon,title,text)=>{
+    if(!tile||tile.dataset.semanticReady==='1')return;
+    tile.dataset.semanticReady='1';
     tile.replaceChildren();
     const card=doc.createElement('div');card.className=`semantic-card ${cls||''}`;
     const i=doc.createElement('div');i.className='icon';i.textContent=icon;
@@ -89,18 +85,23 @@ frame.addEventListener('load',()=>{
     card.append(i,b,s);tile.appendChild(card);
   };
 
+  let renderingCards=false;
   const replaceMemoryPictures=()=>{
+    if(renderingCards)return;
     const memory=doc.querySelector('.memory');
     const tiles=[...doc.querySelectorAll('.memory .pictures .picture')];
-    if(!memory||!tiles.length)return;
-    const word=memory.querySelector('.memory-head h3 span')?.textContent?.trim()||'';
-    const heading=memory.querySelector('.memory-head h3')?.textContent||'';
-    const meaning=heading.includes('=')?heading.slice(heading.indexOf('=')+1).trim():'';
-    const example=memory.querySelector('.memory-tip strong')?.textContent?.trim()||'';
-    const emoji=emojiFor(word,meaning);
-    if(tiles[0])addCard(tiles[0],'',emoji,word,meaning||'记住这个词义');
-    if(tiles[1])addCard(tiles[1],'example','💬','例句场景',example&&example!==word?example:`试着用 ${word} 说一个简单句子`);
-    if(tiles[2])addCard(tiles[2],'method','🧩','三步记忆','先读英文 → 想中文义 → 再读例句');
+    if(!memory||!tiles.length||tiles.every(t=>t.dataset.semanticReady==='1'))return;
+    renderingCards=true;
+    try{
+      const word=memory.querySelector('.memory-head h3 span')?.textContent?.trim()||'';
+      const heading=memory.querySelector('.memory-head h3')?.textContent||'';
+      const meaning=heading.includes('=')?heading.slice(heading.indexOf('=')+1).trim():'';
+      const example=memory.querySelector('.memory-tip strong')?.textContent?.trim()||'';
+      const emoji=emojiFor(word,meaning);
+      addCard(tiles[0],'',emoji,word,meaning||'记住这个词义');
+      addCard(tiles[1],'example','💬','例句场景',example&&example!==word?example:`试着用 ${word} 说一个简单句子`);
+      addCard(tiles[2],'method','🧩','三步记忆','先读英文 → 想中文义 → 再读例句');
+    }finally{renderingCards=false;}
   };
 
   const wordList=doc.getElementById('wordList');
@@ -108,10 +109,13 @@ frame.addEventListener('load',()=>{
 
   const quizBody=doc.getElementById('quizBody');
   if(quizBody){
-    new win.MutationObserver(()=>{
-      if(doc.querySelector('.memory .pictures'))replaceMemoryPictures();
-    }).observe(quizBody,{childList:true,subtree:true});
-    if(doc.querySelector('.memory .pictures'))replaceMemoryPictures();
+    const observer=new win.MutationObserver(()=>{
+      if(doc.querySelector('.memory .pictures .picture:not([data-semantic-ready="1"])')){
+        win.requestAnimationFrame(replaceMemoryPictures);
+      }
+    });
+    observer.observe(quizBody,{childList:true,subtree:true});
+    replaceMemoryPictures();
   }
 });
 </script>
