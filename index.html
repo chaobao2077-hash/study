@@ -13,110 +13,54 @@ const frame=document.getElementById('app');
 frame.addEventListener('load',()=>{
   const win=frame.contentWindow,doc=frame.contentDocument;
   if(!win||!doc)return;
-
+  const SETTINGS_KEY='word-piggy-bank-settings-v3',SYNC_KEY='word-piggy-bank-sync-key-v1',WORDS_KEY='word-piggy-bank-v1',STATS_KEY='word-piggy-bank-stats-v1';
+  const defaults={showImages:false,pexelsKey:'',weightedPractice:true};
+  const loadSettings=()=>{try{return {...defaults,...JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}')}}catch{return {...defaults}}};
+  let settings=loadSettings();
+  const saveSettings=()=>localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));
   const style=doc.createElement('style');
   style.textContent=`
     #wordList .word-main{cursor:pointer;border-radius:9px;transition:.15s ease}
     #wordList .word-main:hover,#wordList .word-main:focus-visible{background:var(--mint);outline:none}
     #wordList .word-main b::after{content:'  🔊';font-family:system-ui,sans-serif;font-size:.78rem;opacity:.55}
-    .memory .pictures{grid-template-columns:repeat(3,1fr)!important}
-    .memory .picture{position:relative!important;background:linear-gradient(145deg,var(--mint),#fff5c9)!important;overflow:hidden!important}
-    .memory .picture>img,.memory .picture>.picture-fallback{display:none!important}
-    .semantic-card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:14px;color:var(--ink);background:linear-gradient(145deg,var(--mint),#fff5c9)}
-    .semantic-card .icon{font-size:2.45rem;line-height:1;margin-bottom:8px}
-    .semantic-card b{display:block;font-family:Georgia,serif;font-size:1.05rem;line-height:1.25;word-break:break-word}
-    .semantic-card span{display:block;margin-top:6px;color:var(--muted);font-size:.72rem;line-height:1.35;max-width:100%;word-break:break-word}
-    .semantic-card.example b,.semantic-card.method b{font-family:inherit;font-size:.82rem}
-    .semantic-card.example span{font-family:Georgia,serif;color:var(--ink)}
-    .memory-actions{position:relative;z-index:5}
-    @media(max-width:520px){.memory .pictures{grid-template-columns:1fr 1fr!important}.memory .picture:last-child{display:none!important}}
+    .choice[data-review-ready="1"]{cursor:pointer}.choice[data-review-ready="1"]:active{transform:scale(.99)}
+    .study-settings-btn{position:fixed;right:14px;top:14px;z-index:9999;border:1px solid var(--line);background:rgba(255,255,255,.95);color:var(--ink);border-radius:999px;padding:9px 12px;font-weight:800;box-shadow:0 8px 20px rgba(25,54,54,.13)}
+    .study-settings-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(20,40,40,.38);display:none;align-items:center;justify-content:center;padding:18px}.study-settings-backdrop.open{display:flex}
+    .study-settings{width:min(520px,100%);max-height:88vh;overflow:auto;background:#fff;border-radius:22px;padding:22px;box-shadow:0 24px 60px rgba(20,40,40,.28);color:var(--ink)}
+    .study-settings h3{margin:0 0 4px;font-size:1.2rem}.study-settings p{margin:0;color:var(--muted);font-size:.82rem;line-height:1.5}
+    .setting-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:15px 0;border-bottom:1px solid var(--line)}.setting-row:last-child{border-bottom:0}.setting-row strong{display:block;margin-bottom:3px}.setting-row small{display:block;color:var(--muted);line-height:1.4}
+    .setting-input{width:100%;margin-top:9px;border:1px solid var(--line);border-radius:11px;padding:10px 11px}
+    .switch{position:relative;width:46px;height:27px;flex:0 0 auto}.switch input{display:none}.switch i{position:absolute;inset:0;border-radius:99px;background:#dce7e2;transition:.2s}.switch i:after{content:'';position:absolute;width:21px;height:21px;left:3px;top:3px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.18);transition:.2s}.switch input:checked+i{background:#2ca67b}.switch input:checked+i:after{transform:translateX(19px)}
+    .settings-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:17px}.settings-actions button{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:11px;padding:10px 12px;font-weight:800}.settings-actions .primary-mini{background:var(--ink);color:#fff;border-color:var(--ink)}
+    .sync-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.73rem;word-break:break-all;background:#f6f8f7;border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;user-select:all}
+    .memory .picture{position:relative!important;overflow:hidden!important;background:linear-gradient(145deg,var(--mint),#fff5c9)!important}.memory .picture>img,.memory .picture>.picture-fallback{display:none!important}
+    .semantic-card{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:14px;color:var(--ink);background:linear-gradient(145deg,var(--mint),#fff5c9)}.semantic-card .icon{font-size:2.4rem;line-height:1;margin-bottom:7px}.semantic-card b{font:700 1.02rem Georgia,serif}.semantic-card span{display:block;margin-top:5px;color:var(--muted);font-size:.72rem;line-height:1.35;word-break:break-word}
+    .pexels-photo{position:absolute;inset:0;width:100%!important;height:100%!important;object-fit:cover!important;display:block!important}.pexels-credit{position:absolute;right:6px;bottom:6px;background:rgba(25,54,54,.78);color:#fff;border-radius:999px;padding:3px 7px;font-size:.58rem}.memory-actions{position:relative;z-index:5}
+    @media(max-width:520px){.study-settings-btn{top:9px;right:9px;padding:8px 10px}.study-settings{padding:18px}}
   `;
   doc.head.appendChild(style);
-
-  const enhanceWords=()=>doc.querySelectorAll('#wordList .word-main').forEach(el=>{
-    if(el.dataset.speakReady)return;
-    el.dataset.speakReady='1';
-    el.setAttribute('role','button');
-    el.tabIndex=0;
-    const word=el.querySelector('b')?.textContent?.trim()||'';
-    el.title=word?`点击朗读 ${word}`:'点击朗读';
-    el.setAttribute('aria-label',word?`朗读 ${word}`:'朗读单词');
-  });
-
-  const speak=el=>{
-    const word=el?.querySelector('b')?.textContent?.trim();
-    if(!word||!('speechSynthesis' in win))return;
-    win.speechSynthesis.cancel();
-    const u=new win.SpeechSynthesisUtterance(word);
-    u.lang='en-US';u.rate=.82;win.speechSynthesis.speak(u);
-  };
-
-  doc.addEventListener('click',e=>{
-    const el=e.target.closest?.('#wordList .word-main');
-    if(el)speak(el);
-  });
-  doc.addEventListener('keydown',e=>{
-    const el=e.target.closest?.('#wordList .word-main');
-    if(el&&(e.key==='Enter'||e.key===' ')){e.preventDefault();speak(el);}
-  });
-
-  const emojiFor=(word,meaning)=>{
-    const text=`${word} ${meaning}`.toLowerCase();
-    const known={curious:'🔎',harvest:'🌾',whisper:'🤫',resilient:'🌱',glimpse:'👀',nourish:'🥣',apple:'🍎',book:'📚',car:'🚗',dog:'🐕',cat:'🐈',bird:'🐦',tree:'🌳',flower:'🌸',water:'💧',house:'🏠',school:'🏫',money:'💰',time:'⏰',food:'🍽️',computer:'💻',phone:'📱'};
-    if(known[word.toLowerCase()])return known[word.toLowerCase()];
-    const rules=[
-      [/动物|狗|猫|鸟|鱼|horse|animal|pet/,'🐾'],[/植物|树|花|草|森林|plant|tree|flower|forest/,'🌿'],
-      [/水果|食物|食品|吃|饮|fruit|food|meal|drink/,'🍎'],[/汽车|车辆|交通|火车|飞机|船|car|vehicle|train|plane|ship/,'🚗'],
-      [/房|建筑|学校|城市|国家|地点|house|building|school|city|country|place/,'🗺️'],[/书|阅读|学习|知识|study|learn|book|read/,'📚'],
-      [/钱|经济|金融|money|finance|bank/,'💰'],[/时间|日期|time|date|hour|minute/,'⏰'],
-      [/身体|器官|健康|body|health|heart|brain/,'🫀'],[/快乐|悲伤|焦虑|害怕|情绪|感觉|happy|sad|anxiety|fear|emotion|feel/,'💭']
-    ];
-    return rules.find(([re])=>re.test(text))?.[1]||'🧠';
-  };
-
-  const addCard=(tile,cls,icon,title,text)=>{
-    if(!tile||tile.dataset.semanticReady==='1')return;
-    tile.dataset.semanticReady='1';
-    tile.replaceChildren();
-    const card=doc.createElement('div');card.className=`semantic-card ${cls||''}`;
-    const i=doc.createElement('div');i.className='icon';i.textContent=icon;
-    const b=doc.createElement('b');b.textContent=title;
-    const s=doc.createElement('span');s.textContent=text;
-    card.append(i,b,s);tile.appendChild(card);
-  };
-
-  let renderingCards=false;
-  const replaceMemoryPictures=()=>{
-    if(renderingCards)return;
-    const memory=doc.querySelector('.memory');
-    const tiles=[...doc.querySelectorAll('.memory .pictures .picture')];
-    if(!memory||!tiles.length||tiles.every(t=>t.dataset.semanticReady==='1'))return;
-    renderingCards=true;
-    try{
-      const word=memory.querySelector('.memory-head h3 span')?.textContent?.trim()||'';
-      const heading=memory.querySelector('.memory-head h3')?.textContent||'';
-      const meaning=heading.includes('=')?heading.slice(heading.indexOf('=')+1).trim():'';
-      const example=memory.querySelector('.memory-tip strong')?.textContent?.trim()||'';
-      const emoji=emojiFor(word,meaning);
-      addCard(tiles[0],'',emoji,word,meaning||'记住这个词义');
-      addCard(tiles[1],'example','💬','例句场景',example&&example!==word?example:`试着用 ${word} 说一个简单句子`);
-      addCard(tiles[2],'method','🧩','三步记忆','先读英文 → 想中文义 → 再读例句');
-    }finally{renderingCards=false;}
-  };
-
-  const wordList=doc.getElementById('wordList');
-  if(wordList){enhanceWords();new win.MutationObserver(enhanceWords).observe(wordList,{childList:true,subtree:true});}
-
+  function randomKey(){const bytes=new Uint8Array(24);crypto.getRandomValues(bytes);return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('')}
+  let syncKey=localStorage.getItem(SYNC_KEY);if(!syncKey){syncKey=randomKey();localStorage.setItem(SYNC_KEY,syncKey)}
+  function bestUSVoice(){const voices=win.speechSynthesis?.getVoices?.()||[],us=voices.filter(v=>/^en-US/i.test(v.lang)),preferred=['Samantha','Ava','Allison','Susan','Joelle','Evan','Alex'];return preferred.map(n=>us.find(v=>v.name.includes(n))).find(Boolean)||us.find(v=>v.localService)||us[0]||voices.find(v=>/^en/i.test(v.lang))||null}
+  function speakText(text){const word=String(text||'').trim();if(!word||!('speechSynthesis' in win))return;win.speechSynthesis.cancel();const u=new win.SpeechSynthesisUtterance(word);u.lang='en-US';u.rate=.9;u.pitch=1;const voice=bestUSVoice();if(voice)u.voice=voice;win.speechSynthesis.speak(u)}
+  win.speechSynthesis?.getVoices?.();win.speechSynthesis?.addEventListener?.('voiceschanged',()=>bestUSVoice());
+  const enhanceWords=()=>doc.querySelectorAll('#wordList .word-main').forEach(el=>{if(el.dataset.speakReady)return;el.dataset.speakReady='1';el.setAttribute('role','button');el.tabIndex=0;const word=el.querySelector('b')?.textContent?.trim()||'';el.title=word?`点击朗读 ${word}`:'点击朗读';el.setAttribute('aria-label',word?`朗读 ${word}`:'朗读单词')});
+  doc.addEventListener('click',e=>{const wordMain=e.target.closest?.('#wordList .word-main');if(wordMain){speakText(wordMain.querySelector('b')?.textContent);return}const choice=e.target.closest?.('.choice[data-review-ready="1"]');if(choice)speakText(choice.dataset.value||choice.textContent.replace(/^[A-D]\s*/,''))});
+  doc.addEventListener('keydown',e=>{const el=e.target.closest?.('#wordList .word-main');if(el&&(e.key==='Enter'||e.key===' ')){e.preventDefault();speakText(el.querySelector('b')?.textContent)}});
+  const originalSpeakWord=win.speakWord;win.speakWord=function(){const word=doc.querySelector('.memory .memory-head h3 span')?.textContent?.trim()||'';if(word&&/[a-z]/i.test(word))speakText(word);else if(typeof originalSpeakWord==='function')originalSpeakWord()};
+  function readWords(){try{const x=JSON.parse(localStorage.getItem(WORDS_KEY)||'[]');return Array.isArray(x)?x:[]}catch{return[]}}
+  function weightedIndex(words){if(!words.length)return 0;const weights=words.map(w=>{const m=Math.max(0,Math.min(100,Number(w.mastery)||0)),u=(100-m)/100;return .06+Math.pow(u,2)});let r=Math.random()*weights.reduce((a,b)=>a+b,0);for(let i=0;i<weights.length;i++){r-=weights[i];if(r<=0)return i}return weights.length-1}
+  const originalStartQuiz=win.startQuiz;if(typeof originalStartQuiz==='function'){win.startQuiz=function(...args){if(!settings.weightedPractice)return originalStartQuiz.apply(this,args);const words=readWords();if(!words.length)return originalStartQuiz.apply(this,args);const idx=weightedIndex(words),realRandom=win.Math.random;let first=true;win.Math.random=()=>{if(first){first=false;return Math.min(.999999,(idx+.25)/words.length)}return realRandom()};try{return originalStartQuiz.apply(this,args)}finally{win.Math.random=realRandom}}}
   const quizBody=doc.getElementById('quizBody');
-  if(quizBody){
-    const observer=new win.MutationObserver(()=>{
-      if(doc.querySelector('.memory .pictures .picture:not([data-semantic-ready="1"])')){
-        win.requestAnimationFrame(replaceMemoryPictures);
-      }
-    });
-    observer.observe(quizBody,{childList:true,subtree:true});
-    replaceMemoryPictures();
-  }
+  const quizObserver=new win.MutationObserver(()=>{doc.querySelectorAll('.choice:disabled').forEach(btn=>{if(btn.classList.contains('correct')||btn.classList.contains('wrong')){btn.disabled=false;btn.dataset.reviewReady='1';btn.title='再点一次可听发音'}});if(doc.querySelector('.memory .pictures'))renderMemoryVisuals()});
+  if(quizBody)quizObserver.observe(quizBody,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','class']});
+  function cleanMeaning(m){return String(m||'').replace(/\b(?:n|v|vt|vi|adj|adv|prep|conj)\.\s*/gi,'').split(/[；;]/)[0].trim()}
+  function emojiFor(word,meaning){const t=`${word} ${meaning}`.toLowerCase(),rules=[[/苹果|水果|fruit|apple/,'🍎'],[/狗|猫|动物|animal|dog|cat/,'🐾'],[/树|花|植物|plant|tree|flower/,'🌿'],[/车|交通|car|vehicle/,'🚗'],[/书|学习|阅读|book|study|read/,'📚'],[/钱|银行|金融|money|bank|finance/,'💰'],[/时间|time/,'⏰'],[/焦虑|害怕|情绪|anxiety|fear|emotion/,'💭']];return rules.find(([re])=>re.test(t))?.[1]||'🧠'}
+  function addSemantic(tile,word,meaning,label){if(!tile)return;tile.replaceChildren();const card=doc.createElement('div');card.className='semantic-card';const i=doc.createElement('div');i.className='icon';i.textContent=emojiFor(word,meaning);const b=doc.createElement('b');b.textContent=label||word;const s=doc.createElement('span');s.textContent=meaning||'记住这个词义';card.append(i,b,s);tile.appendChild(card)}
+  async function fetchPexels(word,meaning){if(!settings.showImages||!settings.pexelsKey)return[];const zh=cleanMeaning(meaning),attempts=[{q:zh||word,locale:'zh-CN'},{q:`${word} ${zh}`.trim(),locale:'en-US'},{q:word,locale:'en-US'}];for(const a of attempts){try{const url=`https://api.pexels.com/v1/search?query=${encodeURIComponent(a.q)}&per_page=3&orientation=landscape&locale=${a.locale}`,r=await win.fetch(url,{headers:{Authorization:settings.pexelsKey}});if(!r.ok)continue;const data=await r.json();if(Array.isArray(data.photos)&&data.photos.length)return data.photos}catch{}}return[]}
+  let visualToken=0;async function renderMemoryVisuals(){const memory=doc.querySelector('.memory'),tiles=[...doc.querySelectorAll('.memory .pictures .picture')];if(!memory||!tiles.length)return;const word=memory.querySelector('.memory-head h3 span')?.textContent?.trim()||'',heading=memory.querySelector('.memory-head h3')?.textContent||'',meaning=heading.includes('=')?heading.slice(heading.indexOf('=')+1).trim():'',example=memory.querySelector('.memory-tip strong')?.textContent?.trim()||'',token=++visualToken;tiles.forEach((t,i)=>addSemantic(t,word,meaning,i===0?word:(i===1?'例句场景':'三步记忆')));if(tiles[1])tiles[1].querySelector('span').textContent=example&&example!==word?example:`试着用 ${word} 造一个简单句`;if(tiles[2])tiles[2].querySelector('span').textContent='英文 → 中文义 → 例句';const photos=await fetchPexels(word,meaning);if(token!==visualToken||!settings.showImages)return;photos.slice(0,tiles.length).forEach((p,i)=>{const tile=tiles[i];if(!tile||!p?.src?.medium)return;tile.replaceChildren();const img=doc.createElement('img');img.className='pexels-photo';img.src=p.src.large||p.src.medium;img.alt=`${word} 相关图片`;img.loading='eager';img.onerror=()=>addSemantic(tile,word,meaning,word);const credit=doc.createElement('span');credit.className='pexels-credit';credit.textContent='Pexels';tile.append(img,credit)})}
+  function makeSettings(){const btn=doc.createElement('button');btn.className='study-settings-btn';btn.type='button';btn.textContent='⚙️ 设置';const back=doc.createElement('div');back.className='study-settings-backdrop';back.innerHTML=`<div class="study-settings" role="dialog" aria-modal="true"><h3>学习设置</h3><p>设置和 Pexels Key 只保存在当前浏览器，不会上传到 GitHub。</p><div class="setting-row"><div><strong>掌握度加权抽题</strong><small>掌握度越高，之后被抽到的概率越低。</small></div><label class="switch"><input id="weightedToggle" type="checkbox"><i></i></label></div><div class="setting-row"><div style="flex:1"><strong>答错时显示 Pexels 图片</strong><small>优先按中文释义搜索；失败时显示语义卡。</small><input id="pexelsKeyInput" class="setting-input" type="password" placeholder="Pexels API Key（仅保存在此设备）"></div><label class="switch"><input id="imageToggle" type="checkbox"><i></i></label></div><div class="setting-row"><div style="flex:1"><strong>学习同步密钥</strong><small>这是本地学习身份。自动跨设备同步还需要云端；目前可用导出/导入迁移进度。</small><div class="sync-code" id="syncCode"></div></div></div><div class="settings-actions"><button id="copyKeyBtn">复制密钥</button><button id="exportBtn">复制进度包</button><button id="importBtn">导入进度包</button><button id="closeSettings" class="primary-mini">完成</button></div></div>`;doc.body.append(btn,back);const weighted=back.querySelector('#weightedToggle'),images=back.querySelector('#imageToggle'),keyInput=back.querySelector('#pexelsKeyInput');const refresh=()=>{settings=loadSettings();weighted.checked=!!settings.weightedPractice;images.checked=!!settings.showImages;keyInput.value=settings.pexelsKey||'';back.querySelector('#syncCode').textContent=syncKey};btn.onclick=()=>{refresh();back.classList.add('open')};back.querySelector('#closeSettings').onclick=()=>back.classList.remove('open');back.addEventListener('click',e=>{if(e.target===back)back.classList.remove('open')});weighted.onchange=()=>{settings.weightedPractice=weighted.checked;saveSettings()};images.onchange=()=>{settings.showImages=images.checked;saveSettings();renderMemoryVisuals()};keyInput.onchange=()=>{settings.pexelsKey=keyInput.value.trim();saveSettings();renderMemoryVisuals()};back.querySelector('#copyKeyBtn').onclick=async()=>{try{await navigator.clipboard.writeText(syncKey);win.showToast?.('同步密钥已复制')}catch{}};back.querySelector('#exportBtn').onclick=async()=>{const payload={version:1,syncKey,words:readWords(),stats:JSON.parse(localStorage.getItem(STATS_KEY)||'{}'),settings:{...settings,pexelsKey:''}};try{await navigator.clipboard.writeText(JSON.stringify(payload));win.showToast?.('学习进度包已复制')}catch{}};back.querySelector('#importBtn').onclick=()=>{const raw=win.prompt('粘贴另一台设备导出的学习进度包：');if(!raw)return;try{const p=JSON.parse(raw);if(!Array.isArray(p.words))throw new Error();localStorage.setItem(WORDS_KEY,JSON.stringify(p.words));localStorage.setItem(STATS_KEY,JSON.stringify(p.stats||{}));if(p.syncKey){syncKey=p.syncKey;localStorage.setItem(SYNC_KEY,syncKey)}win.showToast?.('导入成功，正在刷新');setTimeout(()=>frame.src='./app.html?sync='+Date.now(),300);back.classList.remove('open')}catch{win.alert('进度包格式不正确')}}}
+  const wordList=doc.getElementById('wordList');if(wordList){enhanceWords();new win.MutationObserver(enhanceWords).observe(wordList,{childList:true,subtree:true})}makeSettings();renderMemoryVisuals();
 });
 </script>
 </body>
