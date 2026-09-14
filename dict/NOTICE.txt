@@ -1,0 +1,4 @@
+Dictionary data is derived from ECDICT via the English-Chinese-Dictionary common-word subset:
+https://github.com/skywind3000/ECDICT
+https://github.com/dyeeee/English-Chinese-Dictionary
+
