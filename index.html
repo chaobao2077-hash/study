@@ -79,14 +79,35 @@ frame.addEventListener('load',()=>{
   function imageKey(item){return `${String(item?.word||'').toLowerCase()}|${cleanMeaning(item?.meaning||'')}`}
   function withTimeout(promise,ms){return Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),ms))])}
   const inFlight=new Map();
-  function preloadURL(url){return new Promise(resolve=>{if(!url)return resolve(false);const img=new Image();img.decoding='async';img.onload=()=>resolve(true);img.onerror=()=>resolve(false);img.src=url})}
+  const imageControllers=new Set();
+  const preloadImages=new Set();
+  let imageGeneration=0;
+  function stopAllImageLoading(){
+    imageGeneration += 1;
+    imageControllers.forEach(c=>{try{c.abort()}catch{}});
+    imageControllers.clear();
+    preloadImages.forEach(img=>{try{img.onload=img.onerror=null;img.src=''}catch{}});
+    preloadImages.clear();
+    inFlight.clear();
+  }
+  function preloadURL(url,generation=imageGeneration){return new Promise(resolve=>{
+    if(!settings.showImages||!url||generation!==imageGeneration)return resolve(false);
+    const img=new Image();preloadImages.add(img);img.decoding='async';
+    const done=v=>{preloadImages.delete(img);resolve(v)};
+    img.onload=()=>done(settings.showImages&&generation===imageGeneration);
+    img.onerror=()=>done(false);
+    img.src=url;
+  })}
   async function searchPexels(item){
     if(!settings.showImages||!settings.pexelsKey||!item)return null;
     const zh=cleanMeaning(item.meaning),attempts=[{q:zh||item.word,locale:'zh-CN'},{q:`${item.word} ${zh}`.trim(),locale:'en-US'},{q:item.word,locale:'en-US'}];
     for(const a of attempts){
       try{
         const url=`https://api.pexels.com/v1/search?query=${encodeURIComponent(a.q)}&per_page=1&orientation=landscape&locale=${a.locale}`;
-        const r=await withTimeout(win.fetch(url,{headers:{Authorization:settings.pexelsKey},cache:'no-store'}),2200);
+        const controller=new AbortController();imageControllers.add(controller);
+        const r=await withTimeout(win.fetch(url,{headers:{Authorization:settings.pexelsKey},cache:'no-store',signal:controller.signal}),2200);
+        imageControllers.delete(controller);
+        if(!settings.showImages)return null;
         if(!r.ok)continue;const data=await r.json();const p=data?.photos?.[0];const src=p?.src?.large||p?.src?.medium;if(src)return {src,source:'Pexels'};
       }catch{}
     }
@@ -94,13 +115,15 @@ frame.addEventListener('load',()=>{
   }
   async function prepareImage(item){
     if(!item||!settings.showImages)return null;
-    const k=imageKey(item); if(!k)return null;
+    const generation=imageGeneration;
+    const k=imageKey(item); if(!k||generation!==imageGeneration)return null;
     const cached=imageMap[k];
-    if(cached?.src){preloadURL(cached.src);return cached}
+    if(cached?.src){if(settings.showImages)preloadURL(cached.src,generation);return settings.showImages?cached:null}
     if(inFlight.has(k))return inFlight.get(k);
     const task=(async()=>{
       const found=await searchPexels(item);
-      if(found){imageMap[k]={...found,ts:Date.now()};saveImageMap();await preloadURL(found.src);return found}
+      if(!settings.showImages||generation!==imageGeneration)return null;
+      if(found){imageMap[k]={...found,ts:Date.now()};saveImageMap();await preloadURL(found.src,generation);return (settings.showImages&&generation===imageGeneration)?found:null}
       return null;
     })().finally(()=>inFlight.delete(k));
     inFlight.set(k,task); return task;
@@ -117,7 +140,10 @@ frame.addEventListener('load',()=>{
       activeItem=words[idx]||null;
       const realRandom=win.Math.random;let first=true;
       win.Math.random=()=>{if(first){first=false;return Math.min(.999999,(idx+.25)/words.length)}return realRandom()};
-      try{return originalStartQuiz.apply(this,args)}finally{win.Math.random=realRandom;setTimeout(()=>prepareImage(activeItem),0)}
+      try{return originalStartQuiz.apply(this,args)}finally{
+        win.Math.random=realRandom;
+        if(settings.showImages)setTimeout(()=>{if(settings.showImages)prepareImage(activeItem)},0);
+      }
     };
   }
 
@@ -157,14 +183,18 @@ frame.addEventListener('load',()=>{
   function makeSettings(){
     const btn=doc.createElement('button');btn.className='study-settings-btn';btn.type='button';btn.textContent='⚙️ 设置';
     const back=doc.createElement('div');back.className='study-settings-backdrop';
-    back.innerHTML=`<div class="study-settings" role="dialog" aria-modal="true"><h3>学习设置</h3><p>图片设置、Pexels Key 和同步密钥只保存在当前浏览器。</p><div class="setting-row"><div><strong>掌握度加权抽题</strong><small>掌握度越高，被抽到的概率越低，但不会完全消失。</small></div><label class="switch"><input id="weightedToggle" type="checkbox"><i></i></label></div><div class="setting-row"><div style="flex:1"><strong>答错时显示图片</strong><small>出题时就后台预加载；答错时不等待网络。图片失败不会影响下一题。</small><input id="pexelsKeyInput" class="setting-input" type="password" placeholder="Pexels API Key（仅保存在此设备）"></div><label class="switch"><input id="imageToggle" type="checkbox"><i></i></label></div><div class="setting-row"><div style="flex:1"><strong>学习同步密钥</strong><small>目前用于识别和迁移进度；自动云同步仍需要后端。</small><div class="sync-code" id="syncCode"></div></div></div><div class="settings-actions"><button id="copyKeyBtn">复制密钥</button><button id="exportBtn">复制进度包</button><button id="importBtn">导入进度包</button><button id="clearImageCacheBtn">清除图片缓存</button><button id="closeSettings" class="primary-mini">完成</button></div></div>`;
+    back.innerHTML=`<div class="study-settings" role="dialog" aria-modal="true"><h3>学习设置</h3><p>图片设置、Pexels Key 和同步密钥只保存在当前浏览器。</p><div class="setting-row"><div><strong>掌握度加权抽题</strong><small>掌握度越高，被抽到的概率越低，但不会完全消失。</small></div><label class="switch"><input id="weightedToggle" type="checkbox"><i></i></label></div><div class="setting-row"><div style="flex:1"><strong>答错时显示图片</strong><small>出题时就后台预加载；答错时不等待网络。关闭后完全停止图片请求。</small><input id="pexelsKeyInput" class="setting-input" type="password" placeholder="Pexels API Key（仅保存在此设备）"></div><label class="switch"><input id="imageToggle" type="checkbox"><i></i></label></div><div class="setting-row"><div style="flex:1"><strong>学习同步密钥</strong><small>目前用于识别和迁移进度；自动云同步仍需要后端。</small><div class="sync-code" id="syncCode"></div></div></div><div class="settings-actions"><button id="copyKeyBtn">复制密钥</button><button id="exportBtn">复制进度包</button><button id="importBtn">导入进度包</button><button id="clearImageCacheBtn">清除图片缓存</button><button id="closeSettings" class="primary-mini">完成</button></div></div>`;
     doc.body.append(btn,back);
     const weighted=back.querySelector('#weightedToggle'),images=back.querySelector('#imageToggle'),keyInput=back.querySelector('#pexelsKeyInput');
     const refresh=()=>{settings=loadSettings();weighted.checked=!!settings.weightedPractice;images.checked=!!settings.showImages;keyInput.value=settings.pexelsKey||'';back.querySelector('#syncCode').textContent=syncKey};
     btn.onclick=()=>{refresh();back.classList.add('open')};back.querySelector('#closeSettings').onclick=()=>back.classList.remove('open');back.addEventListener('click',e=>{if(e.target===back)back.classList.remove('open')});
     weighted.onchange=()=>{settings.weightedPractice=weighted.checked;saveSettings()};
-    images.onchange=()=>{settings.showImages=images.checked;saveSettings();if(activeItem)prepareImage(activeItem)};
-    keyInput.onchange=()=>{settings.pexelsKey=keyInput.value.trim();saveSettings();if(activeItem)prepareImage(activeItem)};
+    images.onchange=()=>{
+      settings.showImages=images.checked;saveSettings();
+      if(!settings.showImages){stopAllImageLoading();return;}
+      if(activeItem)prepareImage(activeItem);
+    };
+    keyInput.onchange=()=>{settings.pexelsKey=keyInput.value.trim();saveSettings();if(settings.showImages&&activeItem)prepareImage(activeItem)};
     back.querySelector('#copyKeyBtn').onclick=async()=>{try{await navigator.clipboard.writeText(syncKey);win.showToast?.('同步密钥已复制')}catch{}};
     back.querySelector('#exportBtn').onclick=async()=>{const payload={version:2,syncKey,words:readWords(),stats:loadJSON(STATS_KEY,{}),settings:{...settings,pexelsKey:''}};try{await navigator.clipboard.writeText(JSON.stringify(payload));win.showToast?.('学习进度包已复制')}catch{}};
     back.querySelector('#importBtn').onclick=()=>{const raw=win.prompt('粘贴另一台设备导出的学习进度包：');if(!raw)return;try{const p=JSON.parse(raw);if(!Array.isArray(p.words))throw new Error();localStorage.setItem(WORDS_KEY,JSON.stringify(p.words));localStorage.setItem(STATS_KEY,JSON.stringify(p.stats||{}));if(p.syncKey){syncKey=p.syncKey;localStorage.setItem(SYNC_KEY,syncKey)}win.showToast?.('导入成功，正在刷新');setTimeout(()=>frame.src='./app.html?sync='+Date.now(),300);back.classList.remove('open')}catch{win.alert('进度包格式不正确')}};
